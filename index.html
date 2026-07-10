@@ -48,7 +48,10 @@
   #daypick{background:var(--panel2);color:var(--mut);border:1px solid var(--line);border-radius:4px;font:inherit;font-size:11px;padding:2px 6px}
 
   .maphold{position:relative}
-  #map{display:block;width:100%;height:auto;background:#0d1626}
+  #map{display:block;width:100%;height:auto;background:#0d1626;touch-action:none;cursor:grab}
+  #map.dragging{cursor:grabbing}
+  .zoomreset{position:absolute;right:12px;bottom:12px;background:var(--panel2);border:1px solid var(--line);
+             color:var(--mut);border-radius:4px;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer;display:none;z-index:4}
   #map .pad-g{cursor:pointer}
   #map .ac-g{cursor:pointer}
 
@@ -152,10 +155,36 @@
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 
+  var world=el('g',{});
+  svg.appendChild(world);
   var CFG=null, EVENTS=[], HELITYPES={}, tracks={}, padEls={};
   var lastEv=0, lastPos=0, viewDay='live';
   var OPERATORS={LFE:'LifeFlight Eagle', EVA:'Air Evac Lifeteam', MTN:'Med-Trans',
                  LNK:'AirLife', EMS:'Air Methods'};
+  var REG_OPS=[['MT','Med-Trans (LifeFlight Eagle)'],['LE','LifeFlight Eagle'],
+               ['AE','Air Evac Lifeteam']];
+  function operatorFor(o){
+    if(o.operator)return String(o.operator);
+    var cs=String(o.callsign||'').trim().toUpperCase();
+    var m=cs.match(/^([A-Z]{3})\d/);
+    if(m&&OPERATORS[m[1]])return OPERATORS[m[1]];
+    var reg=String(o.reg||'').trim().toUpperCase();
+    if(reg.length>4){
+      for(var i=0;i<REG_OPS.length;i++){
+        if(reg.slice(-2)===REG_OPS[i][0])return REG_OPS[i][1];
+      }
+    }
+    return '';
+  }
+  function identity(o){
+    var cs=String(o.callsign||'').trim(), reg=String(o.reg||'').trim();
+    var who=cs&&cs!==reg?cs:(reg||o.hex||'');
+    var bits=[];
+    if(cs&&reg&&cs!==reg)bits.push(reg);
+    var op=operatorFor(o); if(op)bits.push(op);
+    var kind=String(o.desc||o.type||'').trim(); if(kind)bits.push(kind);
+    return {who:who,bits:bits};
+  }
   var accard=document.getElementById('accard'), padcard=document.getElementById('padcard');
   function hideCards(){accard.classList.remove('show');padcard.classList.remove('show')}
   svg.addEventListener('click',hideCards);
@@ -165,22 +194,22 @@
     var g=el('g',{stroke:'#16233a','stroke-width':1});
     for(var lo=-94.9;lo<-94.30;lo+=0.1) g.appendChild(el('line',{x1:mx(lo),y1:0,x2:mx(lo),y2:H}));
     for(var la=38.8;la<39.34;la+=0.1)   g.appendChild(el('line',{x1:0,y1:my(la),x2:W,y2:my(la)}));
-    svg.appendChild(g);
+    world.appendChild(g);
     var riv=[[-94.95,39.12],[-94.86,39.16],[-94.75,39.13],[-94.66,39.115],[-94.60,39.11],
              [-94.575,39.09],[-94.52,39.11],[-94.44,39.15],[-94.36,39.17],[-94.30,39.16]];
-    svg.appendChild(el('polyline',{points:riv.map(function(p){return mx(p[0])+','+my(p[1])}).join(' '),
+    world.appendChild(el('polyline',{points:riv.map(function(p){return mx(p[0])+','+my(p[1])}).join(' '),
       fill:'none',stroke:'#1b3153','stroke-width':7,'stroke-linejoin':'round',opacity:.9}));
     var kaw=[[-94.95,39.06],[-94.83,39.05],[-94.70,39.075],[-94.62,39.095],[-94.575,39.09]];
-    svg.appendChild(el('polyline',{points:kaw.map(function(p){return mx(p[0])+','+my(p[1])}).join(' '),
+    world.appendChild(el('polyline',{points:kaw.map(function(p){return mx(p[0])+','+my(p[1])}).join(' '),
       fill:'none',stroke:'#1b3153','stroke-width':5,'stroke-linejoin':'round',opacity:.9}));
-    svg.appendChild(txt(mx(-94.45),my(39.15)-9,'MISSOURI RIVER',
+    world.appendChild(txt(mx(-94.45),my(39.15)-9,'MISSOURI RIVER',
       {fill:'#31486e','font-size':8,'letter-spacing':'2','text-anchor':'middle'}));
-    svg.appendChild(txt(mx(-94.83),my(39.05)+16,'KANSAS RIVER',
+    world.appendChild(txt(mx(-94.83),my(39.05)+16,'KANSAS RIVER',
       {fill:'#31486e','font-size':8,'letter-spacing':'2','text-anchor':'middle'}));
-    svg.appendChild(el('line',{x1:mx(-94.607),y1:my(39.09),x2:mx(-94.607),y2:H,
+    world.appendChild(el('line',{x1:mx(-94.607),y1:my(39.09),x2:mx(-94.607),y2:H,
       stroke:'#26385a','stroke-width':1,'stroke-dasharray':'5 4'}));
-    svg.appendChild(txt(mx(-94.607)-6,H-10,'KS',{fill:'#50658c','font-size':11,'text-anchor':'end','letter-spacing':'2'}));
-    svg.appendChild(txt(mx(-94.607)+6,H-10,'MO',{fill:'#50658c','font-size':11,'letter-spacing':'2'}));
+    world.appendChild(txt(mx(-94.607)-6,H-10,'KS',{fill:'#50658c','font-size':11,'text-anchor':'end','letter-spacing':'2'}));
+    world.appendChild(txt(mx(-94.607)+6,H-10,'MO',{fill:'#50658c','font-size':11,'letter-spacing':'2'}));
 
     CFG.airports.forEach(function(a){
       var x=mx(a.lon),y=my(a.lat),c='#7a8fb5';
@@ -190,7 +219,7 @@
       gp.appendChild(el('circle',{cx:x,cy:y,r:2.2,fill:c}));
       gp.appendChild(txt(x+14,y+4,a.code,{fill:c,'font-size':12}));
       gp.addEventListener('click',function(ev){ev.stopPropagation();showAirport(a)});
-      svg.appendChild(gp);
+      world.appendChild(gp);
     });
 
     CFG.pads.forEach(function(p){
@@ -208,14 +237,14 @@
         {'font-size':12,'text-anchor':anc});
       [ring,core,hTxt,label].forEach(function(n){gp.appendChild(n)});
       gp.addEventListener('click',function(ev){ev.stopPropagation();showPad(p)});
-      svg.appendChild(gp);
+      world.appendChild(gp);
       padEls[p.name]={ring:ring,core:core,h:hTxt,label:label};
     });
   }
   function drawInsetPad(p){
     var ix=12,iy=12,iw=150,ih=104;
-    svg.appendChild(el('rect',{x:ix,y:iy,width:iw,height:ih,fill:'#0d1626',stroke:'#26385a'}));
-    svg.appendChild(el('polyline',{points:(ix+4)+','+(iy+58)+' '+(ix+46)+','+(iy+70)+' '+(ix+92)+','+(iy+56)+' '+(ix+146)+','+(iy+68),
+    world.appendChild(el('rect',{x:ix,y:iy,width:iw,height:ih,fill:'#0d1626',stroke:'#26385a'}));
+    world.appendChild(el('polyline',{points:(ix+4)+','+(iy+58)+' '+(ix+46)+','+(iy+70)+' '+(ix+92)+','+(iy+56)+' '+(ix+146)+','+(iy+68),
       fill:'none',stroke:'#1b3153','stroke-width':5,opacity:.9}));
     var x=ix+iw*0.52,y=iy+ih*0.48;
     var gp=el('g',{'class':'pad-g'});
@@ -225,7 +254,7 @@
     var label=txt(x,y+24,p.code+' ('+p.ident+')',{'font-size':12,'text-anchor':'middle'});
     [ring,core,hTxt,label].forEach(function(n){gp.appendChild(n)});
     gp.addEventListener('click',function(ev){ev.stopPropagation();showPad(p)});
-    svg.appendChild(gp);
+    world.appendChild(gp);
     padEls[p.name]={ring:ring,core:core,h:hTxt,label:label};
   }
 
@@ -263,12 +292,12 @@
       var d=document.createElement('div');
       d.className='ev '+(e.kind==='arrival'?'arr':'dep');
       var yest=viewDay==='live'&&dayCT(e.when)!==today;
+      var id=identity(e);
       d.innerHTML='<div class="t">'+fmtCT(e.when)+(yest?'<div style="font-size:10.5px;color:var(--dim)">yest</div>':'')+
         '</div><div class="stripe"></div>'+
         '<div><span class="kind">'+(e.kind==='arrival'?'ARRIVAL':'DEPARTURE')+'</span>'+
         '<div class="pad-name">'+esc(e.pad)+' <span style="color:var(--dim);font-weight:400">('+esc(e.ident)+')</span></div>'+
-        '<div class="ac"><b>'+esc(e.callsign||'(no callsign)')+'</b> · reg '+esc(e.reg||'?')+' · '+esc(e.type||'?')+'</div>'+
-        '<div class="why">'+esc(e.reason)+'</div>'+
+        '<div class="ac"><b>'+esc(id.who)+'</b>'+(id.bits.length?' · '+esc(id.bits.join(' · ')):'')+'</div>'+
         '<div class="link"><a href="https://globe.airplanes.live/?icao='+esc(e.hex)+'">live track ↗</a></div></div>';
       feed.appendChild(d);
     });
@@ -317,6 +346,8 @@
       var num=cs.slice(3).replace(/^0+/,'');
       return OPERATORS[m[1]]+(num?' '+num:'');
     }
+    var own=String(ac.ownOp||'').trim();
+    if(own)return own.length>24?own.slice(0,23)+'…':own;
     return cs||String(ac.r||'').trim()||ac.hex;
   }
   function heliIcon(color){
@@ -355,7 +386,7 @@
     return {origin:origin,dest:dest};
   }
   var acLayer=el('g',{});
-  svg.appendChild(acLayer);
+  world.appendChild(acLayer);
   function renderAircraft(list){
     acLayer.innerHTML='';
     list.forEach(function(ac){
@@ -417,8 +448,9 @@
         '<div class="stop"><span class="d" '+(route.dest?'':'style="background:var(--dim)"')+'></span>'+
         esc(route.dest||'en route — destination pending')+'</div></div>';
     }
+    var id=identity({callsign:ac.flight,reg:ac.r,hex:ac.hex,operator:ac.ownOp,desc:ac.desc,type:ac.t});
     accard.innerHTML='<div class="nm">'+esc(operatorName(ac))+'</div>'+
-      '<div class="sub">'+esc(cs||'(no callsign)')+' · '+esc(String(ac.r||'?'))+' · '+esc(String(ac.t||'?'))+'</div>'+
+      '<div class="sub">'+esc(id.who)+(id.bits.length?' · '+esc(id.bits.join(' · ')):'')+'</div>'+
       (kt!==null?'<div class="row"><span>speed</span><b>'+kt+' kt</b></div>':'')+
       '<div class="row"><span>status</span><b>'+status+'</b></div>'+routeHtml+
       '<div class="lnk"><a href="https://globe.airplanes.live/?icao='+esc(ac.hex)+'">full track ↗</a></div>';
@@ -430,8 +462,10 @@
     var today=dayCT(Date.now()/1000);
     var rows=hist.length?hist.map(function(e){
       var yest=viewDay==='live'&&dayCT(e.when)!==today;
+      var id=identity(e);
+      var op=operatorFor(e);
       return '<div class="e '+(e.kind==='arrival'?'arr':'dep')+'">'+fmtCT(e.when)+
-        (yest?' (yest)':'')+' · '+esc(e.kind)+' · '+esc(e.callsign||e.reg)+' ('+esc(e.reg)+')</div>';
+        (yest?' (yest)':'')+' · '+esc(e.kind)+' · '+esc(id.who)+(op?' · '+esc(op):'')+'</div>';
     }).join(''):'<div class="none">No activity in the last 24 h.</div>';
     padcard.innerHTML='<span class="x" id="padx">×</span>'+
       '<div class="nm">'+esc(p.name)+'</div>'+
@@ -455,6 +489,76 @@
     document.getElementById('padx').addEventListener('click',function(ev){
       ev.stopPropagation();padcard.classList.remove('show')});
   }
+
+  // ---------- map zoom/pan: the map handles its own gestures ----------
+  var vk=1,vtx=0,vty=0,justDragged=false;
+  var resetBtn=document.createElement('button');
+  resetBtn.className='zoomreset'; resetBtn.textContent='reset view';
+  document.querySelector('.maphold').appendChild(resetBtn);
+  function applyView(){
+    world.setAttribute('transform','translate('+vtx+','+vty+') scale('+vk+')');
+    resetBtn.style.display=vk>1.02?'block':'none';
+  }
+  resetBtn.addEventListener('click',function(){vk=1;vtx=0;vty=0;applyView()});
+  function svgPt(cx,cy){
+    var r=svg.getBoundingClientRect();
+    return [(cx-r.left)*(W/r.width),(cy-r.top)*(H/r.height)];
+  }
+  function zoomAt(px,py,factor){
+    var nk=Math.min(8,Math.max(1,vk*factor));
+    vtx=px-(px-vtx)*(nk/vk); vty=py-(py-vty)*(nk/vk); vk=nk;
+    if(vk<=1.02){vk=1;vtx=0;vty=0}
+    applyView();
+  }
+  svg.addEventListener('wheel',function(e){
+    e.preventDefault();
+    var p=svgPt(e.clientX,e.clientY);
+    zoomAt(p[0],p[1],e.deltaY<0?1.18:1/1.18);
+  },{passive:false});
+  svg.addEventListener('dblclick',function(e){
+    var p=svgPt(e.clientX,e.clientY); zoomAt(p[0],p[1],vk>=4?0.125:2);
+  });
+  var ptrs={},panFrom=null,pinchFrom=null,moved=0;
+  svg.addEventListener('pointerdown',function(e){
+    ptrs[e.pointerId]=[e.clientX,e.clientY]; svg.setPointerCapture(e.pointerId);
+    var ids=Object.keys(ptrs); moved=0;
+    if(ids.length===1)panFrom=[e.clientX,e.clientY,vtx,vty];
+    if(ids.length===2){
+      var a=ptrs[ids[0]],b=ptrs[ids[1]];
+      pinchFrom=[Math.hypot(a[0]-b[0],a[1]-b[1]),vk,(a[0]+b[0])/2,(a[1]+b[1])/2];
+      panFrom=null;
+    }
+  });
+  svg.addEventListener('pointermove',function(e){
+    if(!(e.pointerId in ptrs))return;
+    ptrs[e.pointerId]=[e.clientX,e.clientY];
+    var ids=Object.keys(ptrs);
+    if(ids.length===1&&panFrom){
+      var r=svg.getBoundingClientRect(),sc=W/r.width;
+      var dx=(e.clientX-panFrom[0])*sc,dy=(e.clientY-panFrom[1])*sc;
+      moved+=Math.abs(e.movementX||0)+Math.abs(e.movementY||0);
+      if(vk>1){vtx=panFrom[2]+dx;vty=panFrom[3]+dy;svg.classList.add('dragging');applyView()}
+    }else if(ids.length===2&&pinchFrom){
+      var a=ptrs[ids[0]],b=ptrs[ids[1]];
+      var d=Math.hypot(a[0]-b[0],a[1]-b[1]);
+      var p=svgPt(pinchFrom[2],pinchFrom[3]);
+      var target=pinchFrom[1]*(d/pinchFrom[0]);
+      zoomAt(p[0],p[1],target/vk);
+      moved+=3;
+    }
+  });
+  function ptrEnd(e){
+    delete ptrs[e.pointerId];
+    if(Object.keys(ptrs).length===0){
+      panFrom=null;pinchFrom=null;svg.classList.remove('dragging');
+      if(moved>8){justDragged=true;setTimeout(function(){justDragged=false},250)}
+    }
+  }
+  svg.addEventListener('pointerup',ptrEnd);
+  svg.addEventListener('pointercancel',ptrEnd);
+  svg.addEventListener('click',function(e){
+    if(justDragged){e.stopPropagation();}
+  },true);
 
   // ---------- clocks + freshness ----------
   function two(n){return (n<10?'0':'')+n}
