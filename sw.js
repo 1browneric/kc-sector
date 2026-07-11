@@ -1,6 +1,6 @@
 // Hawkeye Live service worker: cache the shell for instant PWA startup;
 // data/ and airplanes.live are always network (never cached).
-var SHELL = 'hawkeye-shell-v2';
+var SHELL = 'hawkeye-shell-v3';
 var ASSETS = ['./', 'index.html', 'manifest.webmanifest',
               'icons/hawkeye-192.png', 'icons/hawkeye-512.png'];
 self.addEventListener('install', function (e) {
